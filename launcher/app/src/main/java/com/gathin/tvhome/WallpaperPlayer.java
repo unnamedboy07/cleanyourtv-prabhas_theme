@@ -64,11 +64,52 @@ final class WallpaperPlayer {
     private LocalDate sunDay;
     private int[] sun;
 
+    static final String[] PRABHAS_WALLPAPERS = {
+            "prabhas-01-bahubali.jpg",
+            "prabhas-02-bahubali.jpg",
+            "prabhas-03-salaar.jpg",
+            "prabhas-04-fauzi.jpg",
+            "prabhas-05-fauzi.jpg"
+    };
+
+    static final String[] PRABHAS_TITLES = {
+            "Baahubali: The Beginning",
+            "Baahubali 2: The Conclusion",
+            "Salaar: Part 1 \u2013 Ceasefire",
+            "The Raja Saab 1",
+            "The Raja Saab 2"
+    };
+
     WallpaperPlayer(Context context, FrameLayout root, Config config) {
         this.root = root;
         backgroundColor = config.backgroundColor;
-        files = loadPrabhasWallpapers(context, config.wallpapers);
-        interval = 0L; // Background changes only when Home opens; no timed slideshow.
+        if (!config.wallpaperEnabled) {
+            files = new ArrayList<>();
+        } else {
+            List<File> prabhas = ensurePrabhasWallpapers(context);
+            if (config.wallpaper != null && config.wallpapers.size() == 1) {
+                String singleName = config.wallpaper.getName();
+                File match = null;
+                for (File f : prabhas) {
+                    if (f.getName().equals(singleName)) {
+                        match = f;
+                        break;
+                    }
+                }
+                if (match != null) {
+                    files = new ArrayList<>(Collections.singletonList(match));
+                } else if (config.wallpaper.isFile()) {
+                    files = new ArrayList<>(config.wallpapers);
+                } else {
+                    files = prabhas;
+                }
+            } else if (!prabhas.isEmpty()) {
+                files = prabhas;
+            } else {
+                files = new ArrayList<>(config.wallpapers);
+            }
+        }
+        interval = 0L; // Background changes only when Home is manually triggered; no timed slideshow.
         bitmapConfig = config.wallpaperTrueColor ? Bitmap.Config.ARGB_8888 : Bitmap.Config.RGB_565;
         // The dim is painted into the picture (decode), so no full-screen shade layer is drawn on every frame.
         dimColor = config.wallpaperDim > 0 ? (config.wallpaperDim * 255 / 100) << 24 : 0;
@@ -90,8 +131,15 @@ final class WallpaperPlayer {
         image = new ImageView(context);
         image.setScaleType(ImageView.ScaleType.CENTER_CROP);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        names = config.wallpaperCaptions && config.wallpaperEnabled && !files.isEmpty()
-                ? WallpaperCaptions.read(files.get(0).getParentFile()) : Collections.emptyMap();
+        Map<String, String> prabhasCaptions = new java.util.HashMap<>();
+        for (int i = 0; i < PRABHAS_WALLPAPERS.length; i++) {
+            prabhasCaptions.put(PRABHAS_WALLPAPERS[i], PRABHAS_TITLES[i]);
+        }
+        if (config.wallpaperCaptions && config.wallpaperEnabled && !files.isEmpty()) {
+            Map<String, String> fileCaptions = WallpaperCaptions.read(files.get(0).getParentFile());
+            prabhasCaptions.putAll(fileCaptions);
+        }
+        names = prabhasCaptions;
         caption = names.isEmpty() ? null : makeCaption(context, root);
         if (!files.isEmpty()) {
             root.addView(image, 0, new FrameLayout.LayoutParams(
@@ -100,19 +148,12 @@ final class WallpaperPlayer {
         }
     }
 
-    /** Bundled Prabhas wallpapers replace the theme's wallpaper collection, without changing any launcher UI. */
-    private static List<File> loadPrabhasWallpapers(Context context, List<File> fallback) {
-        String[] names = {
-                "prabhas-01-bahubali.jpg",
-                "prabhas-02-bahubali.jpg",
-                "prabhas-03-salaar.jpg",
-                "prabhas-04-fauzi.jpg",
-                "prabhas-05-fauzi.jpg"
-        };
+    /** Bundled Prabhas wallpapers extracted to cache once. */
+    static List<File> ensurePrabhasWallpapers(Context context) {
         File directory = new File(context.getCacheDir(), "prabhas-home-wallpapers-v3");
-        if (!directory.isDirectory() && !directory.mkdirs()) return new ArrayList<>(fallback);
+        if (!directory.isDirectory() && !directory.mkdirs()) return Collections.emptyList();
         List<File> result = new ArrayList<>();
-        for (String name : names) {
+        for (String name : PRABHAS_WALLPAPERS) {
             File target = new File(directory, name);
             if (!target.isFile() || target.length() == 0) {
                 try (java.io.InputStream in = context.getAssets().open("prabhas-wallpapers/" + name);
@@ -127,22 +168,38 @@ final class WallpaperPlayer {
             }
             if (target.isFile() && target.length() > 0) result.add(target);
         }
-        return result.size() == names.length ? result : new ArrayList<>(fallback);
+        return result;
     }
+
+    private static List<File> loadPrabhasWallpapers(Context context, List<File> fallback) {
+        List<File> prabhas = ensurePrabhasWallpapers(context);
+        return prabhas.size() == PRABHAS_WALLPAPERS.length ? prabhas : new ArrayList<>(fallback);
+    }
+
     /**
-     * The picture Home opens with is decoded right here, on the main thread, as the single wallpaper always was:
-     * Home's first frame already has it instead of drawing the plain colour and the picture popping in later.
-     * Only the later changes of a rotation decode in the background.
+     * Shows the initial wallpaper. If a previous wallpaper is already set and valid, it is restored
+     * so that returns from settings or activity recreation do not unexpectedly change the picture.
      */
     private void showFirst() {
+        if (files.isEmpty()) return;
         String previous = preferences.getString("image", "");
         List<File> playable = playable();
-        File first = WallpaperRotation.pick(playable, previous, random);
+        File first = null;
+        if (!previous.isEmpty()) {
+            for (File file : playable) {
+                if (file.getName().equals(previous)) {
+                    first = file;
+                    break;
+                }
+            }
+        }
+        if (first == null && !playable.isEmpty()) {
+            first = WallpaperRotation.pick(playable, previous, order, random);
+        }
         while (first != null) {
             Bitmap bitmap = decode(first);
             if (bitmap != null) {
                 show(bitmap);
-                // The picture covers the whole screen: the root's plain colour under it is overdraw.
                 root.setBackground(null);
                 displayed = first.getName();
                 showCaption(false);
@@ -152,7 +209,7 @@ final class WallpaperPlayer {
                 }
                 return;
             }
-            files.remove(first);   // unreadable or over 4K: try another, or keep the plain colour
+            files.remove(first);
             playable = playable();
             first = WallpaperRotation.pick(playable, previous, order, random);
         }
@@ -160,19 +217,17 @@ final class WallpaperPlayer {
 
     void start() {
         active = true;
-        // showFirst() already chose the first picture during construction. Every later return to Home
-        // chooses another picture, excluding the one shown before; update() never drives a timed slideshow.
-        if (!startedOnce) {
-            startedOnce = true;
-            return;
+        // Do not rotate on start/resume. Only restore if dropped under memory pressure.
+        if (current == null && !files.isEmpty()) {
+            showFirst();
         }
-        showNextOnHomeOpen();
     }
 
-    private void showNextOnHomeOpen() {
-        if (!active || closed || loading || files.isEmpty()) return;
+    /** Rotates to the next wallpaper only when Home is manually triggered by the remote. */
+    void rotateNext() {
+        if (!active || closed || loading || files.size() <= 1) return;
         String previous = preferences.getString("image", "");
-        File next = WallpaperRotation.pick(playable(), previous, random);
+        File next = WallpaperRotation.pick(playable(), previous, order, random);
         if (next == null || next.getName().equals(displayed)) return;
         loading = true;
         decoder.execute(() -> {
@@ -185,7 +240,7 @@ final class WallpaperPlayer {
                 }
                 if (bitmap == null) {
                     files.remove(next);
-                    showNextOnHomeOpen();
+                    rotateNext();
                     return;
                 }
                 show(bitmap);

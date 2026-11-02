@@ -173,6 +173,14 @@ final class StartupIntroOverlay {
         finishImmediately();
     }
 
+    boolean isPlaying() {
+        return overlay != null && !fadeOutStarted;
+    }
+
+    void skip() {
+        fadeOut();
+    }
+
     private void finishImmediately() {
         handler.removeCallbacks(fallbackFadeIn);
         handler.removeCallbacks(scheduledFadeOut);

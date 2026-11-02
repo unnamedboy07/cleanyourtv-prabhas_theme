@@ -43,6 +43,12 @@ final class Config {
     static final String ROWS_BELOW_DOCK_KEY = "rows_below_dock";
     static final String WALLPAPER_CHOICE_KEY = "wallpaper_choice";
     static final String DOCK_OPACITY_KEY = "dock_opacity";
+    static final String INTRO_VIDEO_KEY = "intro_video";
+    static final String ALWAYS_SHOW_NAMES_KEY = "always_show_names";
+    static final String SHOW_STATS_KEY = "show_stats";
+    static final String SKY_INTENSITY_KEY = "sky_intensity";
+    static final String FOCUS_OVERSHOOT_KEY = "focus_overshoot";
+    static final String WALLPAPER_DIM_KEY = "wallpaper_dim";
     /**
      * Counts the changes made in Launcher settings. Home remembers the count it was built with and rebuilds on
      * resume when it differs, however the settings were left (see MainActivity#onResume).
@@ -246,6 +252,8 @@ final class Config {
     final boolean singleRow;
     /** With single_row, the band runs behind every app in the row, not only the dock apps (config.xml, dock_band_all). */
     final boolean dockBandAll;
+    /** Startup intro video playback enabled. */
+    final boolean introVideo;
 
     private Config(List<String> dockApps, boolean fillDock, List<String> hiddenApps, List<String> libraryApps, String liveTvPackage,
                    String liveTvAction, String liveTvInputId, Map<String, String> launchActions, Map<String, String> appLabels,
@@ -260,7 +268,7 @@ final class Config {
                    List<RaceWeekend.Race> raceCalendar, boolean cinematicHome, boolean ambientGlow, boolean appGlow, boolean fadeRows, int homeIdleClockMinutes,
                    boolean keyFilter, boolean dockGlass, String glowStyle, boolean wallpaperCaptions,
                    boolean handleViewInputs, boolean tileMenu, boolean dockEvenPadding, boolean dockBand, boolean cinematicDots, boolean cinematicWhiteFocus, boolean wifiStatusColor, int cinematicScrim, int cinematicArt,
-                   Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean powerOnHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock) {
+                   Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean powerOnHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean introVideo) {
         this.handleViewInputs = handleViewInputs;
         this.tileMenu = tileMenu;
         this.inputKeycodes = inputKeycodes;
@@ -362,6 +370,7 @@ final class Config {
         this.glowStyle = glowStyle(glowStyle);
         this.wallpaperCaptions = wallpaperCaptions;
         this.glassStyle = glassStyle(glassStyle);
+        this.introVideo = introVideo;
     }
 
     /** A known glow_style, or radial (the default) for anything else. */
@@ -592,6 +601,19 @@ final class Config {
         if (chosenRows >= 0 && chosenRows <= 3) rowsBelow = chosenRows;
         animations = choices.getBoolean("animations", animations);
         advancedEffects = choices.getBoolean("advanced_effects", advancedEffects);
+        boolean introVideo = choices.getBoolean(INTRO_VIDEO_KEY, true);
+        if (choices.contains(ALWAYS_SHOW_NAMES_KEY)) {
+            alwaysShowNames = choices.getBoolean(ALWAYS_SHOW_NAMES_KEY, alwaysShowNames);
+        }
+        if (choices.contains(SHOW_STATS_KEY)) {
+            showStats = choices.getBoolean(SHOW_STATS_KEY, showStats);
+        }
+        if (choices.contains(SKY_INTENSITY_KEY)) {
+            skyIntensity = choices.getInt(SKY_INTENSITY_KEY, skyIntensity);
+        }
+        if (choices.contains(FOCUS_OVERSHOOT_KEY)) {
+            focusOvershoot = choices.getBoolean(FOCUS_OVERSHOOT_KEY, focusOvershoot);
+        }
         File wallpaper = dir != null ? new File(dir, WALLPAPER_NAME) : null;
         if (wallpaper != null && !(wallpaper.isFile() && wallpaper.length() > 0)) wallpaper = null;
         // A theme can also switch the wallpaper off while the file is still there.
@@ -599,6 +621,9 @@ final class Config {
         if (!wallpaperEnabled) wallpaper = null;
         int rotationMinutes = json == null ? 0 : integer(json, "wallpaper_rotation_minutes", 0, 0, 1440);
         int wallpaperDim = json == null ? 0 : integer(json, "wallpaper_dim", 0, 0, 90);
+        if (choices.contains(WALLPAPER_DIM_KEY)) {
+            wallpaperDim = choices.getInt(WALLPAPER_DIM_KEY, wallpaperDim);
+        }
         int dockOpacity = json == null ? 100 : integer(json, "dock_opacity", 100, 30, 100);
         dockOpacity = chosenDockOpacity(choices.getInt(DOCK_OPACITY_KEY, -1), dockOpacity);
         String wallpaperOrder = json == null ? WallpaperRotation.ORDER_SHUFFLE
@@ -613,8 +638,11 @@ final class Config {
         // An on-TV wallpaper pick overrides the theme: a filename from the wallpapers/
         // collection, or "none". Unset means the theme decides (off by default).
         String wallpaperChoice = choices.getString(WALLPAPER_CHOICE_KEY, null);
-        List<File> chosen = WallpaperRotation.chosen(dir == null ? Collections.emptyList()
-                : WallpaperRotation.images(new File(dir, "wallpapers")), wallpaper, wallpaperChoice);
+        List<File> allCandidates = new ArrayList<>(WallpaperPlayer.ensurePrabhasWallpapers(ctx));
+        if (dir != null) {
+            allCandidates.addAll(WallpaperRotation.images(new File(dir, "wallpapers")));
+        }
+        List<File> chosen = WallpaperRotation.chosen(allCandidates, wallpaper, wallpaperChoice);
         if (chosen != null) {
             wallpapers.clear();
             wallpapers.addAll(chosen);
@@ -638,7 +666,7 @@ final class Config {
                 dockBand, cinematicDots, cinematicWhiteFocus, wifiStatusColor, cinematicScrim, cinematicArt, wallpaperMoods, gamepadPassthrough,
                 consumeVolumeKeys, powerOnHome, wifiStatusWarnings, topBarApps, showGreeting, headerWhite, clockWallpaper,
                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
-                dateBelowClock);
+                dateBelowClock, introVideo);
     }
 
     /**
@@ -682,11 +710,15 @@ final class Config {
             SharedPreferences.Editor editor = choices.edit();
             if (!"absent".equals(token)) editor.remove("columns").remove("animations")
                     .remove("advanced_effects").remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY)
-                    .remove(DOCK_OPACITY_KEY);
+                    .remove(DOCK_OPACITY_KEY).remove(INTRO_VIDEO_KEY).remove(ALWAYS_SHOW_NAMES_KEY)
+                    .remove(SHOW_STATS_KEY).remove(SKY_INTENSITY_KEY).remove(FOCUS_OVERSHOOT_KEY)
+                    .remove(WALLPAPER_DIM_KEY);
             editor.putString(THEME_SIGNATURE_KEY, signature).commit();
         } else if (!seen.equals(signature)) {
             choices.edit().remove("columns").remove("animations").remove("advanced_effects")
                     .remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY).remove(DOCK_OPACITY_KEY)
+                    .remove(INTRO_VIDEO_KEY).remove(ALWAYS_SHOW_NAMES_KEY).remove(SHOW_STATS_KEY)
+                    .remove(SKY_INTENSITY_KEY).remove(FOCUS_OVERSHOOT_KEY).remove(WALLPAPER_DIM_KEY)
                     .putString(THEME_SIGNATURE_KEY, signature).commit();
         }
     }

@@ -55,7 +55,13 @@
     <string name="wallpaper_state">Wallpaper: %1$s</string>
     <string name="wallpaper_none">None</string>
     <string name="wallpaper_applied">Wallpaper changed</string>
-    <string name="wallpaper_theme_default">Theme default</string>
+    <string name="wallpaper_theme_default">Theme default (Rotate on Home)</string>
+    <string name="intro_video_state">Startup intro video: %1$s</string>
+    <string name="always_show_names_state">App names under tiles: %1$s</string>
+    <string name="show_stats_state">System stats (CPU &amp; RAM): %1$s</string>
+    <string name="focus_overshoot_state">Focus bounce (overshoot): %1$s</string>
+    <string name="wallpaper_dim_label">Wallpaper dim</string>
+    <string name="sky_intensity_label">Sky backdrop</string>
     <string name="animations_state">Animations: %1$s</string>
     <string name="advanced_effects">Advanced effects</string>
     <string name="advanced_effects_state">Advanced effects: %1$s</string>

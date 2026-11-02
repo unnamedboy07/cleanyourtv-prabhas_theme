@@ -135,8 +135,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private FrameLayout root;
     private WallpaperPlayer wallpaperPlayer;
     private StartupIntroOverlay startupIntro;
-    /** True after Home was stopped; guarantees the intro replays on the next return to Home. */
-    private boolean introOnNextResume;
+    private boolean homeTriggeredIntro;
+    private boolean introVideoEnabled = true;
     private GlassView glass;
     private View ambient;
     private TextView heroName;
@@ -396,6 +396,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         dockRow = cfg.dockRow;
         singleRow = cfg.singleRow;
         focusOvershoot = cfg.focusOvershoot;
+        introVideoEnabled = cfg.introVideo;
         festival = cfg.festival;
         festive = festival.active(LocalDate.now());
         liveTvPkg = cfg.liveTvPackage;
@@ -828,7 +829,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (savedInstanceState == null) {
             if (!openLauncherSettingsIfAsked(getIntent())) {
                 boolean inputsActionHandled = openInputsIfAsked(getIntent());
-                if (!inputsActionHandled) startupIntro.play();
+                if (!inputsActionHandled && introVideoEnabled) startupIntro.play();
             }
         }
     }
@@ -896,17 +897,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (openLauncherSettingsIfAsked(intent)) return;
         if (openInputsIfAsked(intent)) return;
         if (intent == null || !intent.hasCategory(Intent.CATEGORY_HOME)) return;
-        if (startupIntro != null) startupIntro.play();
-        grid.scrollToPosition(0);
-        lastFocused = 0;
-        lastFocusedKey = adapter.getItemCount() > 0 ? adapter.keyAt(0) : null;
+        if (wallpaperPlayer != null) wallpaperPlayer.rotateNext();
         if (stopped) {
+            homeTriggeredIntro = true;
             tileRefresh.onHomeAgain();
         } else {
+            if (startupIntro != null && introVideoEnabled) startupIntro.play();
             // Still on screen (the quick panel was over it, or Home was already in front): the tiles are current,
             // so only go back to the first one; rebuilding would replay the entrance animation for nothing.
             grid.post(() -> focusTile(0));
         }
+        grid.scrollToPosition(0);
+        lastFocused = 0;
+        lastFocusedKey = adapter.getItemCount() > 0 ? adapter.keyAt(0) : null;
     }
 
     @Override
@@ -926,11 +929,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
-        // Some TV firmware resumes the HOME task without delivering a CATEGORY_HOME onNewIntent.
-        // Replay the intro after every real return from another app, but not for dialogs/quick panels.
-        if (introOnNextResume && startupIntro != null) {
-            introOnNextResume = false;
+        if (homeTriggeredIntro && startupIntro != null && introVideoEnabled) {
+            homeTriggeredIntro = false;
             startupIntro.play();
+        } else {
+            homeTriggeredIntro = false;
         }
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
@@ -1164,7 +1167,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onStop() {
         super.onStop();
-        introOnNextResume = true;
         started = false;
         unregisterReceiver(timeReceiver);
         handler.removeCallbacks(clockCheck);
@@ -1250,6 +1252,20 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (startupIntro != null && startupIntro.isPlaying() && (event.getKeyCode() == KeyEvent.KEYCODE_BACK
+                || event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE)) {
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+                startupIntro.skip();
+            }
+            return true;
+        }
+        if (event.getKeyCode() == KeyEvent.KEYCODE_HOME && event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+            if (startupIntro != null && introVideoEnabled) startupIntro.play();
+            if (wallpaperPlayer != null) wallpaperPlayer.rotateNext();
+            grid.scrollToPosition(0);
+            focusTile(0);
+            return true;
+        }
         if (handleSettingsKey(event)) return true;
         if (tileMenuEnabled && !reordering && openPopup == null && cardPrompt == null
                 && event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
